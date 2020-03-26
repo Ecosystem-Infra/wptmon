@@ -1,0 +1,4 @@
+cron:
+- description: "foo 10minutely"
+  url: "/"
+  schedule: "every 10 minutes"
