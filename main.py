@@ -14,6 +14,7 @@ app = flask.Flask(__name__)
 
 @app.route("/")
 def foo():
+  logging.info("Running foo")
   return "All your WPT are monitor to us!"
 
 def main(argv):
@@ -23,7 +24,6 @@ def main(argv):
   if "localhost" in argv:
     app.run(host='127.0.0.1', port=8080, debug=True)
     return
-
   print(foo())
 
 if __name__ == '__main__':
