@@ -28,15 +28,15 @@ def get_num_recent_stable_runs():
     fyi_runs.raise_for_status()
   except requests.exceptions.RequestException as e:
     logging.error("Failed to fetch runs, e=%s" % e)
-    return -1
+    return "Failed to fetch runs, e=%s" % e
 
   try:
     if not fyi_runs.json():
       logging.error("Received empty JSON")
-      return -1
+      return "Received empty JSON"
   except:
     logging.error("Failed to parse JSON, content=%s" % fyi_runs.content)
-    return -1
+    return "Failed to parse JSON, content=%s" % fyi_runs.content
 
   # At this point we should have a response in |fyi_runs|, which is a list of
   # dicts. Each dict contains info about a single run.
@@ -45,12 +45,12 @@ def get_num_recent_stable_runs():
   for run in fyi_runs.json():
     logging.debug("Processing run %s" % json.dumps(run))
     run_end_time = date_parser.parse(run["time_end"])
-    run_age_seconds = (datetime.now(tz=timezone.utc) - run_end_time).seconds
+    run_age_seconds = (datetime.now(tz=timezone.utc) - run_end_time).total_seconds()
     if run_age_seconds <= RUNS_MAX_AGE_SECONDS:
       recent_run_count += 1
 
   logging.info("Finished processing runs, recent runs=%d" % recent_run_count)
-  return "%d" % recent_run_count
+  return "Recent runs: %d" % recent_run_count
 
 def main(argv):
   # This method is only used when running locally
