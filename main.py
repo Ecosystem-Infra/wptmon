@@ -13,6 +13,7 @@ import sys
 import time
 
 import flask
+from google.api_core import exceptions as g_exceptions
 from google.cloud import monitoring_v3
 
 logging.basicConfig(level=logging.DEBUG)
@@ -86,8 +87,11 @@ def get_num_recent_stable_runs():
     if run_age_seconds <= RUNS_MAX_AGE_SECONDS:
       recent_run_count += 1
 
-  create_metric_recent_stable_runs()
-  write_metric_recent_stable_runs(recent_run_count)
+  try:
+    create_metric_recent_stable_runs()
+    write_metric_recent_stable_runs(recent_run_count)
+  except g_exceptions.InvalidArgument as e:
+    logging.error("Failed to update metrics skipping: %s" % e)
 
   logging.info("Finished processing runs, recent runs=%d" % recent_run_count)
   return "Recent runs: %d" % recent_run_count
