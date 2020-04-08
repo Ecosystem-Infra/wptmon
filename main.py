@@ -133,6 +133,7 @@ def get_num_recent_stable_runs():
     write_metric_recent_stable_runs(num_recent_runs)
   except g_exceptions.InvalidArgument as e:
     logging.error("Failed to update stable run metrics skipping: %s" % e)
+  return "Recent stable runs: %d" % num_recent_runs
 
 def get_num_recent_experimental_runs():
   logging.info("Counting recent experimental runs")
@@ -142,11 +143,13 @@ def get_num_recent_experimental_runs():
     write_metric_recent_experimental_runs(num_recent_runs)
   except g_exceptions.InvalidArgument as e:
     logging.error("Failed to update experimental run metrics skipping: %s" % e)
+  return "Recent experimental runs: %d" % num_recent_runs
 
 @app.route("/")
 def get_num_recent_runs():
-  get_num_recent_stable_runs()
-  get_num_recent_experimental_runs()
+  result = get_num_recent_stable_runs()
+  result += "<br>\n" + get_num_recent_experimental_runs()
+  return result
 
 def main(argv):
   # This method is only used when running locally
