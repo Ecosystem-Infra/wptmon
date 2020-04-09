@@ -23,6 +23,7 @@ GCLOUD_PROJECT_ID = "wptmon"
 DESCRIPTOR_PROJECT_NAME = "projects/wptmon"
 RUNS_REQ_TIMEOUT_SECONDS = 5
 RUNS_MAX_AGE_SECONDS = 24 * 60 * 60  # 1 day
+ERROR_RESULT = -1
 
 RECENT_STABLE_RUNS_FETCH_URL="https://wpt.fyi/api/runs?labels=master,stable&products=chrome,firefox,safari&max-count=1"
 RECENT_EXPERIMENTAL_RUNS_FETCH_URL="https://wpt.fyi/api/runs?labels=master,experimental&products=chrome,edge,firefox,safari,webkitgtk&max-count=1"
@@ -101,15 +102,15 @@ def _get_num_recent_runs(fetch_url, max_age_seconds):
     fyi_runs.raise_for_status()
   except requests.exceptions.RequestException as e:
     logging.error("Failed to fetch runs, e=%s" % e)
-    return "Failed to fetch runs, e=%s" % e
+    return ERROR_RESULT
 
   try:
     if not fyi_runs.json():
       logging.error("Received empty JSON")
-      return "Received empty JSON"
+      return ERROR_RESULT
   except:
     logging.error("Failed to parse JSON, content=%s" % fyi_runs.content)
-    return "Failed to parse JSON, content=%s" % fyi_runs.content
+    return ERROR_RESULT
 
   # At this point we should have a response in |fyi_runs|, which is a list of
   # dicts. Each dict contains info about a single run.
@@ -128,6 +129,9 @@ def _get_num_recent_runs(fetch_url, max_age_seconds):
 def get_num_recent_stable_runs():
   logging.info("Counting recent stable runs")
   num_recent_runs = _get_num_recent_runs(RECENT_STABLE_RUNS_FETCH_URL, RUNS_MAX_AGE_SECONDS)
+  if num_recent_runs == ERROR_RESULT:
+    return "Failed to get stable runs"
+
   try:
     create_metric_recent_stable_runs()
     write_metric_recent_stable_runs(num_recent_runs)
@@ -138,6 +142,9 @@ def get_num_recent_stable_runs():
 def get_num_recent_experimental_runs():
   logging.info("Counting recent experimental runs")
   num_recent_runs = _get_num_recent_runs(RECENT_EXPERIMENTAL_RUNS_FETCH_URL, RUNS_MAX_AGE_SECONDS)
+  if num_recent_runs == ERROR_RESULT:
+    return "Failed to get experimental runs"
+  
   try:
     create_metric_recent_experimental_runs()
     write_metric_recent_experimental_runs(num_recent_runs)
