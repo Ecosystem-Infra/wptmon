@@ -1,4 +1,5 @@
 Flask==1.1.1
 google-cloud-monitoring==0.34.0
+pygithub==1.50
 python-dateutil==2.8.1
 requests==2.23.0
