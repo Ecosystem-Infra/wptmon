@@ -64,10 +64,11 @@ def _create_metric_recent_runs(type, description):
   client.create_metric_descriptor(DESCRIPTOR_PROJECT_NAME, descriptor)
 
 
-def _write_metric_recent_runs(type, num_recent_runs):
+def _write_metric_recent_runs(type, browser_name, num_recent_runs, ):
   """Updates a 'recent runs' metric (stable or experimental).
 
   :arg type: string descriptor type for the metric
+  :arg browser_name: string name of the browser, added as a label for the metric
   :arg num_recent_runs: int the number of recent runs
   """
   client = monitoring_v3.MetricServiceClient()
@@ -77,7 +78,10 @@ def _write_metric_recent_runs(type, num_recent_runs):
   series.resource.labels["namespace"] = "wpt"
   series.resource.labels["location"] = "us-east1"
   series.resource.labels["job"] = "wpt.fyi"
-  series.resource.labels["task_id"] = "wpt.fyi"
+  # We stick the browser name inside the task ID. Unfortunately we can't modify
+  # the set of labels that is available on the MonitoredResource, nor can we
+  # define a custom one.
+  series.resource.labels["task_id"] = browser_name
   point = series.points.add()
   point.value.int64_value = num_recent_runs
   point.interval.end_time.seconds = int(time.time())
@@ -118,22 +122,31 @@ def create_metric_recent_experimental_runs():
                              "Number of recent experimental runs on wpt.fyi")
 
 
-def write_metric_recent_stable_runs(num_stable_runs):
-  """Updates the 'recent stable runs' metric with the number of stable runs."""
-  _write_metric_recent_runs(METRIC_TYPE_RECENT_STABLE_RUNS, num_stable_runs)
+def write_metric_recent_stable_runs(browser_name, num_stable_runs):
+  """Updates the 'recent stable runs' metric.
+
+  Sets the number of recent stable runs for the specified browser.
+  """
+  _write_metric_recent_runs(METRIC_TYPE_RECENT_STABLE_RUNS, browser_name,
+                            num_stable_runs)
 
 
-def write_metric_recent_experimental_runs(num_experimental_runs):
-  """Updates the 'recent experimental runs' metric with the number of stable runs."""
-  _write_metric_recent_runs(METRIC_TYPE_RECENT_EXPERIMENTAL_RUNS, num_experimental_runs)
+def write_metric_recent_experimental_runs(browser_name, num_experimental_runs):
+  """Updates the 'recent experimental runs' metric.
+
+   Sets the the number of recent experimental runs for the specified browser.
+   """
+  _write_metric_recent_runs(METRIC_TYPE_RECENT_EXPERIMENTAL_RUNS,
+                            browser_name, num_experimental_runs)
 
 
-def _get_num_recent_runs(fetch_url, max_age_seconds):
-  """Get a list of latest runs and count how many are recent.
+def _get_recent_runs(fetch_url, max_age_seconds):
+  """Get a list of latest runs and identify which browsers have recent runs.
 
   :arg fetch_url: string url where to fetch the list of runs
   :arg max_age: int the age, in seconds, of the oldest run that is considered recent.
-  :return int the number of recent runs
+  :return list of strings containing the browser names with a recent run, or None
+          if recent runs could not be fetched.
   """
 
   try:
@@ -143,57 +156,58 @@ def _get_num_recent_runs(fetch_url, max_age_seconds):
     fyi_runs.raise_for_status()
   except requests.exceptions.RequestException as e:
     logging.error("Failed to fetch runs, e=%s" % e)
-    return ERROR_RESULT
+    return None
 
   try:
     if not fyi_runs.json():
       logging.error("Received empty JSON")
-      return ERROR_RESULT
+      return None
   except:
     logging.error("Failed to parse JSON, content=%s" % fyi_runs.content)
-    return ERROR_RESULT
+    return None
 
   # At this point we should have a response in |fyi_runs|, which is a list of
-  # dicts. Each dict contains info about a single run.
-  # Count the number of recent runs.
-  recent_run_count = 0
+  # dicts. Each dict contains info about a single run, one for each browser.
+  recent_browsers = []
   for run in fyi_runs.json():
     logging.debug("Processing run %s" % json.dumps(run))
     run_end_time = date_parser.parse(run["time_end"])
     run_age_seconds = (datetime.now(tz=timezone.utc) - run_end_time).total_seconds()
     if run_age_seconds <= max_age_seconds:
-      recent_run_count += 1
+      recent_browsers.append(run["browser_name"])
 
-  logging.info("Finished processing runs, recent runs=%d" % recent_run_count)
-  return recent_run_count
+  logging.info("Finished processing runs, recent browser runs=%s" % recent_browsers)
+  return recent_browsers
 
 
-def get_num_recent_stable_runs():
-  logging.info("Counting recent stable runs")
-  num_recent_runs = _get_num_recent_runs(RECENT_STABLE_RUNS_FETCH_URL, RUNS_MAX_AGE_SECONDS)
-  if num_recent_runs == ERROR_RESULT:
+def get_recent_stable_runs():
+  logging.info("Finding recent stable runs")
+  recent_browsers = _get_recent_runs(RECENT_STABLE_RUNS_FETCH_URL, RUNS_MAX_AGE_SECONDS)
+  if recent_browsers is None:
     return "Failed to get stable runs"
 
   try:
     create_metric_recent_stable_runs()
-    write_metric_recent_stable_runs(num_recent_runs)
+    for browser_name in recent_browsers:
+      write_metric_recent_stable_runs(browser_name, 1)
   except g_exceptions.InvalidArgument as e:
     logging.error("Failed to update stable run metrics skipping: %s" % e)
-  return "Recent stable runs: %d" % num_recent_runs
+  return "Recent stable runs: %s" % recent_browsers
 
 
-def get_num_recent_experimental_runs():
-  logging.info("Counting recent experimental runs")
-  num_recent_runs = _get_num_recent_runs(RECENT_EXPERIMENTAL_RUNS_FETCH_URL, RUNS_MAX_AGE_SECONDS)
-  if num_recent_runs == ERROR_RESULT:
+def get_recent_experimental_runs():
+  logging.info("Finding recent experimental runs")
+  recent_browsers = _get_recent_runs(RECENT_EXPERIMENTAL_RUNS_FETCH_URL, RUNS_MAX_AGE_SECONDS)
+  if recent_browsers is None:
     return "Failed to get experimental runs"
 
   try:
     create_metric_recent_experimental_runs()
-    write_metric_recent_experimental_runs(num_recent_runs)
+    for browser_name in recent_browsers:
+      write_metric_recent_experimental_runs(browser_name, 1)
   except g_exceptions.InvalidArgument as e:
     logging.error("Failed to update experimental run metrics skipping: %s" % e)
-  return "Recent experimental runs: %d" % num_recent_runs
+  return "Recent experimental runs: %s" % recent_browsers
 
 
 def get_num_open_prs():
@@ -216,8 +230,8 @@ def get_num_open_prs():
 
 @app.route("/")
 def get_all_metrics():
-  result = get_num_recent_stable_runs()
-  result += "<br>\n" + get_num_recent_experimental_runs()
+  result = get_recent_stable_runs()
+  result += "<br>\n" + get_recent_experimental_runs()
   result += "<br>\n" + get_num_open_prs()
   return result
 
