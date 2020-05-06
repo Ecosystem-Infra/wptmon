@@ -128,7 +128,7 @@ def create_and_write_metric_open_prs(num_open_prs):
   client.create_time_series(DESCRIPTOR_PROJECT_NAME, [series])
 
 
-def create_and_write_metric_open_pr_no_checks(num_prs_with_no_checks):
+def create_and_write_metric_open_pr_no_checks(num_prs_with_no_checks, is_draft):
   client = monitoring_v3.MetricServiceClient()
   descriptor = monitoring_v3.types.MetricDescriptor()
   descriptor.type = METRIC_TYPE_OPEN_PR_NO_CHECKS
@@ -143,7 +143,7 @@ def create_and_write_metric_open_pr_no_checks(num_prs_with_no_checks):
   series.resource.labels["namespace"] = "wpt"
   series.resource.labels["location"] = "us-east1"
   series.resource.labels["job"] = "wpt-github"
-  series.resource.labels["task_id"] = "wpt-github"
+  series.resource.labels["task_id"] = "draft_pr" if is_draft else "pr"
   point = series.points.add()
   point.value.int64_value = num_prs_with_no_checks
   point.interval.end_time.seconds = int(time.time())
@@ -314,6 +314,7 @@ def get_open_pr_statuses(mon_state):
   status_dict = defaultdict(lambda: defaultdict(int))
   # Keep track of the PR numbers that have no checks.
   prs_with_no_checks = []
+  draft_prs_with_no_checks = []
 
   for open_pr in mon_state.github_open_prs:
     # The timestamps reported by github are in UTC, so add the tzinfo.
@@ -340,13 +341,17 @@ def get_open_pr_statuses(mon_state):
     logging.info("PR %d has check status %s" % (open_pr.number, deduped_dict))
     if not deduped_dict:
       # Empty dict means there are no checks on this PR
-      prs_with_no_checks.append(open_pr.number)
+      if open_pr.draft:
+        draft_prs_with_no_checks.append(open_pr.number)
+      else:
+        prs_with_no_checks.append(open_pr.number)
     # Add the deduped statuses for this PR to the combined list
     for context, state in deduped_dict.items():
       status_dict[context][state] += 1
 
   try:
-    create_and_write_metric_open_pr_no_checks(len(prs_with_no_checks))
+    create_and_write_metric_open_pr_no_checks(len(prs_with_no_checks), is_draft=False)
+    create_and_write_metric_open_pr_no_checks(len(draft_prs_with_no_checks), is_draft=True)
   except g_exceptions.InvalidArgument as e:
     logging.error("Failed to PRs-with-no-checks metric, skipping: %s" % e)
 
@@ -361,8 +366,10 @@ def get_open_pr_statuses(mon_state):
 
   logging.info("Got combined PR statuses, dict=%s", status_dict)
   logging.info("PRs with no checks, %s", prs_with_no_checks)
-  return "Open PR statuses: %s<br>\nOpen PRs with no checks: [%d]%s" \
-         % (status_dict, len(prs_with_no_checks), prs_with_no_checks)
+  logging.info("Draft PRs with no checks, %s", draft_prs_with_no_checks)
+  return "Open PR statuses: %s<br>\nOpen PRs with no checks: [%d] %s Drafts: [%d] %s" \
+         % (status_dict, len(prs_with_no_checks), prs_with_no_checks,
+            len(draft_prs_with_no_checks), draft_prs_with_no_checks)
 
 @app.route("/")
 def get_all_metrics():
