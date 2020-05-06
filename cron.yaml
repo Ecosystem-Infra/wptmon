@@ -1,4 +1,4 @@
 cron:
-- description: "foo 10minutely"
+- description: "foo 20minutely"
   url: "/"
-  schedule: "every 10 minutes"
+  schedule: "every 20 minutes"
