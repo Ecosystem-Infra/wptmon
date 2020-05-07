@@ -27,7 +27,7 @@ GCLOUD_PROJECT_ID = "wptmon"
 DESCRIPTOR_PROJECT_NAME = "projects/wptmon"
 RUNS_REQ_TIMEOUT_SECONDS = 5
 RUNS_MAX_AGE_SECONDS = 24 * 60 * 60  # 1 day
-OPEN_PRS_MAX_AGE_SECONDS = 7 * 24 * 60 * 60  # 1 week
+OPEN_PRS_MAX_AGE_SECONDS = 30 * 24 * 60 * 60  # 30 days
 ERROR_RESULT = -1
 
 RECENT_STABLE_RUNS_FETCH_URL = "https://wpt.fyi/api/runs?labels=master,stable&products=chrome,firefox,safari&max-count=1"
@@ -283,39 +283,31 @@ def get_recent_experimental_runs():
   return "Recent experimental runs: %s" % recent_browsers
 
 
-def get_num_open_prs(mon_state):
-  logging.info("Counting open github PRs")
+def get_open_pr_statuses(mon_state):
+  logging.info("Finding statuses for open PRs")
   gh_token = _get_github_token()
   if not gh_token:
     return "Failed to load github token"
 
   github = Github(gh_token)
   wpt_repo = github.get_repo("web-platform-tests/wpt")
+  # NOTE: mon_state is redundant here since we set and use it in the same
+  # function. This is a throwback to when counting PRs and statuses were in
+  # two methods. Leaving it here for now since this might be split again later.
   mon_state.github_open_prs = wpt_repo.get_pulls(state="open", base="master",
                                                  sort="updated", direction="desc")
-  num_open_prs = mon_state.github_open_prs.totalCount
-  logging.info("Finished counting open PRs: %d" % num_open_prs)
 
-  try:
-    create_and_write_metric_open_prs(num_open_prs)
-  except g_exceptions.InvalidArgument as e:
-    logging.error("Failed to update open PRs metric, skipping: %s" % e)
-  return "Open PRs: %d" % num_open_prs
-
-
-def get_open_pr_statuses(mon_state):
-  logging.info("Finding statuses for open PRs")
   # We require that open PRs have already been identified.
   # TODO: make this capable of rebuilding open PRs list if needed
   assert mon_state.github_open_prs is not None
 
+  num_open_prs = 0
   # Status types is a 2-level dict mapping context->state->count, making it a
   # dict(str->dict(str->int))
   status_dict = defaultdict(lambda: defaultdict(int))
   # Keep track of the PR numbers that have no checks.
   prs_with_no_checks = []
   draft_prs_with_no_checks = []
-
   for open_pr in mon_state.github_open_prs:
     # The timestamps reported by github are in UTC, so add the tzinfo.
     pr_update_time_utc = open_pr.updated_at.replace(tzinfo=timezone.utc)
@@ -325,6 +317,7 @@ def get_open_pr_statuses(mon_state):
                    % (open_pr.number, open_pr.updated_at.strftime("%c%Z")))
       break
 
+    num_open_prs += 1
     # Commits are listed in order of increasing timestamp, meaning the last one
     # is the most-recent one.
     latest_commit = open_pr.get_commits()[open_pr.commits - 1]
@@ -350,6 +343,11 @@ def get_open_pr_statuses(mon_state):
       status_dict[context][state] += 1
 
   try:
+    create_and_write_metric_open_prs(num_open_prs)
+  except g_exceptions.InvalidArgument as e:
+    logging.error("Failed to update open PRs metric, skipping: %s" % e)
+
+  try:
     create_and_write_metric_open_pr_no_checks(len(prs_with_no_checks), is_draft=False)
     create_and_write_metric_open_pr_no_checks(len(draft_prs_with_no_checks), is_draft=True)
   except g_exceptions.InvalidArgument as e:
@@ -358,17 +356,17 @@ def get_open_pr_statuses(mon_state):
   create_metric_open_pr_statuses()
   for context, state_dict in status_dict.items():
     for state, count in state_dict.items():
-      print("Trying to write a metric for %s %s %d" % (context, state, count))
       try:
         write_metric_open_pr_statuses(context, state, count)
       except g_exceptions.InvalidArgument as e:
         logging.error("Failed to PR status metric, skipping: %s" % e)
 
+  logging.info("Finished counting open PRs: %d" % num_open_prs)
   logging.info("Got combined PR statuses, dict=%s", status_dict)
   logging.info("PRs with no checks, %s", prs_with_no_checks)
   logging.info("Draft PRs with no checks, %s", draft_prs_with_no_checks)
-  return "Open PR statuses: %s<br>\nOpen PRs with no checks: [%d] %s Drafts: [%d] %s" \
-         % (status_dict, len(prs_with_no_checks), prs_with_no_checks,
+  return "Open PRs: %d<br>\nOpen PR statuses: %s<br>\nOpen PRs with no checks: [%d] %s Drafts: [%d] %s" \
+         % (num_open_prs, status_dict, len(prs_with_no_checks), prs_with_no_checks,
             len(draft_prs_with_no_checks), draft_prs_with_no_checks)
 
 @app.route("/")
@@ -376,7 +374,6 @@ def get_all_metrics():
   mon_state = MonitorState()
   result = get_recent_stable_runs()
   result += "<br>\n" + get_recent_experimental_runs()
-  result += "<br>\n" + get_num_open_prs(mon_state)
   result += "<br>\n" + get_open_pr_statuses(mon_state)
   return result
 
